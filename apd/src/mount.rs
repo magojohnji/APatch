@@ -9,6 +9,8 @@ use retry::delay::NoDelay;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use rustix::{fd::AsFd, fs::CWD, mount::*};
 use std::fs::create_dir;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use std::os::unix::fs::PermissionsExt;
 
 use crate::defs::AP_OVERLAY_SOURCE;
 use crate::defs::PTS_NAME;
@@ -31,10 +33,15 @@ impl AutoMountExt4 {
         let path = Path::new(source);
         if !path.exists() {
             println!("Source path does not exist");
-        }
-        let metadata = fs::metadata(path)?;
-        if !metadata.permissions().readonly() {
-            println!("Source path is not read-only");
+        } else {
+            let metadata = fs::metadata(path)?;
+            let permissions = metadata.permissions();
+            let mode = permissions.mode();
+
+            if permissions.readonly() {
+                #[cfg(any(target_os = "linux", target_os = "android"))]
+                println!("File permissions: {:o} (octal)", mode & 0o777);
+            }
         }
 
         mount_ext4(source, target)?;
@@ -181,6 +188,7 @@ pub fn mount_devpts(dest: impl AsRef<Path>) -> Result<()> {
         MountFlags::empty(),
         "newinstance",
     )?;
+    mount_change(dest.as_ref(), MountPropagationFlags::PRIVATE).context("make devpts private")?;
     Ok(())
 }
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
@@ -211,6 +219,7 @@ pub fn mount_tmpfs(dest: impl AsRef<Path>) -> Result<()> {
             "",
         )?;
     }
+    mount_change(dest.as_ref(), MountPropagationFlags::PRIVATE).context("make tmpfs private")?;
     let pts_dir = format!("{}/{PTS_NAME}", dest.as_ref().display());
     if let Err(e) = mount_devpts(pts_dir) {
         warn!("do devpts mount failed: {}", e);

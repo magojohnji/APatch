@@ -4,6 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.clickable
@@ -47,6 +49,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -75,7 +78,7 @@ import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.content.FileProvider
 import androidx.core.os.LocaleListCompat
 import com.ramcosta.composedestinations.annotation.Destination
-
+import com.ramcosta.composedestinations.annotation.RootGraph
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -89,16 +92,19 @@ import me.bmax.apatch.ui.component.rememberLoadingDialog
 import me.bmax.apatch.ui.theme.refreshTheme
 import me.bmax.apatch.util.APatchKeyHelper
 import me.bmax.apatch.util.getBugreportFile
-import me.bmax.apatch.util.getFileNameFromUri
 import me.bmax.apatch.util.hideapk.HideAPK
 import me.bmax.apatch.util.isGlobalNamespaceEnabled
+import me.bmax.apatch.util.outputStream
 import me.bmax.apatch.util.rootShellForResult
 import me.bmax.apatch.util.setGlobalNamespaceEnabled
 import me.bmax.apatch.util.ui.APDialogBlurBehindUtils
+import me.bmax.apatch.util.ui.LocalSnackbarHost
 import me.bmax.apatch.util.ui.NavigationBarsSpacer
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-@Destination
+@Destination<RootGraph>
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 fun SettingScreen() {
@@ -116,15 +122,25 @@ fun SettingScreen() {
     if (kPatchReady && aPatchReady) {
         isGlobalNamespaceEnabled = isGlobalNamespaceEnabled()
     }
-    Scaffold(topBar = {
-        TopBar()
-    }) { paddingValues ->
+
+    val snackBarHost = LocalSnackbarHost.current
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.settings)) },
+            )
+        },
+        snackbarHost = { SnackbarHost(snackBarHost) }
+    ) { paddingValues ->
 
         val loadingDialog = rememberLoadingDialog()
-        val clearKeyDialog = rememberConfirmDialog(onConfirm = {
-            APatchKeyHelper.clearConfigKey()
-            APApplication.superKey = ""
-        })
+        val clearKeyDialog = rememberConfirmDialog(
+            onConfirm = {
+                APatchKeyHelper.clearConfigKey()
+                APApplication.superKey = ""
+            }
+        )
 
         val showLanguageDialog = rememberSaveable { mutableStateOf(false) }
         LanguageDialog(showLanguageDialog)
@@ -145,6 +161,26 @@ fun SettingScreen() {
         }
 
         var showLogBottomSheet by remember { mutableStateOf(false) }
+
+        val scope = rememberCoroutineScope()
+        val context = LocalContext.current
+        val logSavedMessage = stringResource(R.string.log_saved)
+        val exportBugreportLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.CreateDocument("application/gzip")
+        ) { uri: Uri? ->
+            if (uri != null) {
+                scope.launch(Dispatchers.IO) {
+                    loadingDialog.show()
+                    uri.outputStream().use { output ->
+                        getBugreportFile(context).inputStream().use {
+                            it.copyTo(output)
+                        }
+                    }
+                    loadingDialog.hide()
+                    snackBarHost.showSnackbar(message = logSavedMessage)
+                }
+            }
+        }
 
         Column(
             modifier = Modifier
@@ -206,7 +242,7 @@ fun SettingScreen() {
                     })
             }
 
-            // Webview Debug
+            // WebView Debug
             if (aPatchReady) {
                 var enableWebDebugging by rememberSaveable {
                     mutableStateOf(
@@ -394,7 +430,7 @@ fun SettingScreen() {
             if (showLogBottomSheet) {
                 ModalBottomSheet(
                     onDismissRequest = { showLogBottomSheet = false },
-                    windowInsets = WindowInsets(0, 0, 0, 0),
+                    contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
                     content = {
                         Row(
                             modifier = Modifier
@@ -407,34 +443,14 @@ fun SettingScreen() {
                                     .padding(16.dp)
                                     .clickable {
                                         scope.launch {
-                                            val bugreport = loadingDialog.withLoading {
-                                                withContext(Dispatchers.IO) {
-                                                    getBugreportFile(context)
-                                                }
-                                            }
-
-                                            val uri: Uri = FileProvider.getUriForFile(
-                                                context,
-                                                "${BuildConfig.APPLICATION_ID}.fileprovider",
-                                                bugreport
-                                            )
-                                            val filename = getFileNameFromUri(context, uri)
-                                            val savefile =
-                                                Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                                                    addCategory(Intent.CATEGORY_OPENABLE)
-                                                    type = "application/zip"
-                                                    putExtra(Intent.EXTRA_STREAM, uri)
-                                                    putExtra(Intent.EXTRA_TITLE, filename)
-                                                    flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
-                                                }
-                                            context.startActivity(
-                                                Intent.createChooser(
-                                                    savefile, context.getString(R.string.save_log)
-                                                )
-                                            )
+                                            val formatter =
+                                                DateTimeFormatter.ofPattern("yyyy-MM-dd_HH_mm")
+                                            val current = LocalDateTime.now().format(formatter)
+                                            exportBugreportLauncher.launch("APatch_bugreport_${current}.tar.gz")
                                             showLogBottomSheet = false
                                         }
-                                    }) {
+                                    }
+                                ) {
                                     Icon(
                                         Icons.Filled.Save,
                                         contentDescription = null,
@@ -470,10 +486,11 @@ fun SettingScreen() {
                                                 bugreport
                                             )
 
-                                            val shareIntent = Intent(Intent.ACTION_SEND)
-                                            shareIntent.putExtra(Intent.EXTRA_STREAM, uri)
-                                            shareIntent.setDataAndType(uri, "application/zip")
-                                            shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                putExtra(Intent.EXTRA_STREAM, uri)
+                                                setDataAndType(uri, "application/gzip")
+                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            }
 
                                             context.startActivity(
                                                 Intent.createChooser(
@@ -760,33 +777,35 @@ fun LanguageDialog(showLanguageDialog: MutableState<Boolean>) {
 
     if (showLanguageDialog.value) {
         BasicAlertDialog(
-            onDismissRequest = { showLanguageDialog.value = false },
-            properties = DialogProperties(usePlatformDefaultWidth = false),
+            onDismissRequest = { showLanguageDialog.value = false }
         ) {
             Surface(
                 modifier = Modifier
                     .width(150.dp)
                     .wrapContentHeight(),
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(28.dp),
                 tonalElevation = AlertDialogDefaults.TonalElevation,
                 color = AlertDialogDefaults.containerColor,
             ) {
                 LazyColumn {
                     itemsIndexed(languages) { index, item ->
-                        ListItem(headlineContent = { Text(item) }, modifier = Modifier.clickable {
-                            showLanguageDialog.value = false
-                            if (index == 0) {
-                                AppCompatDelegate.setApplicationLocales(
-                                    LocaleListCompat.getEmptyLocaleList()
-                                )
-                            } else {
-                                AppCompatDelegate.setApplicationLocales(
-                                    LocaleListCompat.forLanguageTags(
-                                        languagesValues[index]
+                        ListItem(
+                            headlineContent = { Text(item) },
+                            modifier = Modifier.clickable {
+                                showLanguageDialog.value = false
+                                if (index == 0) {
+                                    AppCompatDelegate.setApplicationLocales(
+                                        LocaleListCompat.getEmptyLocaleList()
                                     )
-                                )
+                                } else {
+                                    AppCompatDelegate.setApplicationLocales(
+                                        LocaleListCompat.forLanguageTags(
+                                            languagesValues[index]
+                                        )
+                                    )
+                                }
                             }
-                        })
+                        )
                     }
                 }
             }
@@ -794,12 +813,4 @@ fun LanguageDialog(showLanguageDialog: MutableState<Boolean>) {
             APDialogBlurBehindUtils.setupWindowBlurListener(dialogWindowProvider.window)
         }
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun TopBar() {
-    TopAppBar(
-        title = { Text(stringResource(R.string.settings)) },
-    )
 }

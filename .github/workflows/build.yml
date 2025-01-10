@@ -47,17 +47,17 @@ jobs:
           java-version: 21
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-home-cache-cleanup: true
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: Setup Android NDK
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
+      - name: Setup ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
         with:
-          ndk-version: r26d
-          add-to-path: true
-          local-cache: true
+          version: 1.12.1
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ''
 
       - name: Install toolchain
         run: |
@@ -80,13 +80,14 @@ jobs:
           echo 'android.native.buildOutput=verbose' >> gradle.properties
           sed -i 's/org.gradle.configuration-cache=true//g' gradle.properties
           ./gradlew clean assembleRelease
+          echo "BUILD_TOOL_VERSION=$(ls /usr/local/lib/android/sdk/build-tools/ | tail -n 1)" >> $GITHUB_ENV
 
       - name: Sign Release
-        env: 
+        env:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
         if: ${{ env.SIGNING_KEY != '' }}
         continue-on-error: true
-        uses: kevin-david/zipalign-sign-android-release@v1.1
+        uses: noriban/sign-android-release@v5.1
         id: sign_app
         with:
           releaseDirectory: app/build/outputs/apk/release
@@ -96,13 +97,14 @@ jobs:
           keyPassword: ${{ secrets.KEY_PASSWORD }}
 
       - name: Upload build artifact
-        env: 
-           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
         if: ${{ env.SIGNING_KEY != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: APatch
           path: ${{steps.sign_app.outputs.signedReleaseFile}}
+
       - name: Post to channel
         if: ${{github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.ref_type != 'tag'}}
         env:
@@ -119,8 +121,9 @@ jobs:
             URL=$(python3 .github/scripts/telegram_url.py -1001910818234)
             curl -v "$URL" -F Release=@${{ steps.sign_app.outputs.signedReleaseFile }}
           fi
+
       - name: Release apk
-        env: 
+        env:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
         if: ${{ env.SIGNING_KEY != '' && github.ref_type == 'tag' }}
         continue-on-error: true

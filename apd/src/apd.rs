@@ -14,19 +14,19 @@ use crate::{
     defs,
     utils::{self, umask},
 };
+use rustix::thread::{set_thread_res_gid, set_thread_res_uid, Gid, Uid};
 
 fn print_usage(opts: Options) {
-    let brief = format!("APatch\n\nUsage: <command> [options] [-] [user [argument...]]");
+    let brief = "APatch\n\nUsage: <command> [options] [-] [user [argument...]]".to_string();
     print!("{}", opts.usage(&brief));
 }
 
 fn set_identity(uid: u32, gid: u32) {
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    unsafe {
-        libc::seteuid(uid);
-        libc::setresgid(gid, gid, gid);
-        libc::setresuid(uid, uid, uid);
-    }
+    let gid = unsafe { Gid::from_raw(gid) };
+    let uid = unsafe { Uid::from_raw(uid) };
+    set_thread_res_gid(gid, gid, gid).ok();
+    set_thread_res_uid(uid, uid, uid).ok();
 }
 
 #[cfg(not(unix))]
@@ -204,7 +204,7 @@ pub fn root_shell() -> Result<()> {
             // switch to global mount namespace
             #[cfg(any(target_os = "linux", target_os = "android"))]
             let global_namespace_enable =
-                std::fs::read_to_string("/data/adb/.global_namespace_enable")
+                std::fs::read_to_string(defs::GLOBAL_NAMESPACE_FILE)
                     .unwrap_or("0".to_string());
             if global_namespace_enable.trim() == "1" || mount_master {
                 let _ = utils::switch_mnt_ns(1);

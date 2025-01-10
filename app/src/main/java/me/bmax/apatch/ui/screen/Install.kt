@@ -17,6 +17,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -34,24 +35,31 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.ramcosta.composedestinations.annotation.Destination
+import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.bmax.apatch.R
 import me.bmax.apatch.ui.component.KeyEventBlocker
-import me.bmax.apatch.util.ui.LocalSnackbarHost
 import me.bmax.apatch.util.installModule
 import me.bmax.apatch.util.reboot
+import me.bmax.apatch.util.ui.LocalSnackbarHost
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+enum class MODULE_TYPE {
+    KPM,
+    APM
+}
+
 @Composable
-@Destination
-fun InstallScreen(navigator: DestinationsNavigator, uri: Uri) {
+@Destination<RootGraph>
+fun InstallScreen(navigator: DestinationsNavigator, uri: Uri, type: MODULE_TYPE) {
     var text by rememberSaveable { mutableStateOf("") }
+    var tempText : String
     val logContent = rememberSaveable { StringBuilder() }
     var showFloatAction by rememberSaveable { mutableStateOf(false) }
 
@@ -64,14 +72,25 @@ fun InstallScreen(navigator: DestinationsNavigator, uri: Uri) {
             return@LaunchedEffect
         }
         withContext(Dispatchers.IO) {
-            installModule(uri, onFinish = { success ->
+            installModule(uri, type, onFinish = { success ->
                 if (success) {
                     showFloatAction = true
                 }
             }, onStdout = {
-                text += "$it\n"
+                tempText = "$it\n"
+                if (tempText.startsWith("[H[J")) { // clear command
+                    text = tempText.substring(6)
+                } else {
+                    text += tempText
+                }
                 logContent.append(it).append("\n")
             }, onStderr = {
+                tempText = "$it\n"
+                if (tempText.startsWith("[H[J")) { // clear command
+                    text = tempText.substring(6)
+                } else {
+                    text += tempText
+                }
                 logContent.append(it).append("\n")
             })
         }
@@ -89,7 +108,7 @@ fun InstallScreen(navigator: DestinationsNavigator, uri: Uri) {
                         val date = format.format(Date())
                         val file = File(
                             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                            "APatch_install_log_${date}.log"
+                            "APatch_install_${type}_log_${date}.log"
                         )
                         file.writeText(logContent.toString())
                         snackBarHost.showSnackbar("Log saved to ${file.absolutePath}")
@@ -113,7 +132,8 @@ fun InstallScreen(navigator: DestinationsNavigator, uri: Uri) {
                 )
             }
 
-        }
+        },
+        snackbarHost = { SnackbarHost(snackBarHost) }
     ) { innerPadding ->
         KeyEventBlocker {
             it.key == Key.VolumeDown || it.key == Key.VolumeUp

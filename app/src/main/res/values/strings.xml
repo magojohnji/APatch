@@ -15,7 +15,6 @@
 
     <string name="reboot">Reboot</string>
     <string name="settings">Settings</string>
-    <string name="reboot_userspace">Soft Reboot</string>
     <string name="reboot_recovery">Reboot to Recovery</string>
     <string name="reboot_bootloader">Reboot to Bootloader</string>
     <string name="reboot_download">Reboot to Download</string>
@@ -35,7 +34,8 @@
 
     <string name="about_source_code"><![CDATA[<p>View source code at %1$s<p/>Join our %2$s channel<p/>Join our %3$s group]]></string>
     <string name="send_log">Send Log</string>
-    <string name="save_log">Save Logs</string>
+    <string name="save_log">Save Log</string>
+    <string name="log_saved">Log saved</string>
     <string name="safe_mode">Safe mode</string>
 
     <string name="super_key">SuperKey</string>
@@ -79,22 +79,22 @@
     <string name="patch_start_unpatch_btn">UnPatch</string>
     <string name="patch_item_error">!!ERROR!!</string>
     <string name="patch_item_bootimg">bootimg</string>
-    <string name="patch_item_bootimg_slot">slot: </string>
-    <string name="patch_item_bootimg_dev">device: </string>
+    <string name="patch_item_bootimg_slot">slot:</string>
+    <string name="patch_item_bootimg_dev">device:</string>
     <string name="patch_item_kernel">Kernel</string>
     <string name="patch_item_kpimg">kpimg</string>
-    <string name="patch_item_kpimg_version">version: </string>
-    <string name="patch_item_kpimg_comile_time">time: </string>
-    <string name="patch_item_kpimg_config">config: </string>
-    <string name="patch_item_new_extra_kpm">Embed new </string>
-    <string name="patch_item_existed_extra_kpm">Existed </string>
-    <string name="patch_item_extra_name">name: </string>
-    <string name="patch_item_extra_version">version: </string>
-    <string name="patch_item_extra_author">author: </string>
-    <string name="patch_item_extra_kpm_license">license: </string>
-    <string name="patch_item_extra_kpm_desciption">description: </string>
-    <string name="patch_item_extra_args">args: </string>
-    <string name="patch_item_extra_event">event: </string>
+    <string name="patch_item_kpimg_version">Version:</string>
+    <string name="patch_item_kpimg_comile_time">Time:</string>
+    <string name="patch_item_kpimg_config">Config:</string>
+    <string name="patch_item_new_extra_kpm">Embed new</string>
+    <string name="patch_item_existed_extra_kpm">Existed</string>
+    <string name="patch_item_extra_name">Name:</string>
+    <string name="patch_item_extra_version">Version:</string>
+    <string name="patch_item_extra_author">Author:</string>
+    <string name="patch_item_extra_kpm_license">License:</string>
+    <string name="patch_item_extra_kpm_desciption">Description:</string>
+    <string name="patch_item_extra_args">Args:</string>
+    <string name="patch_item_extra_event">Event:</string>
     <string name="patch_item_skey">Super Key</string>
     <string name="patch_item_set_skey_label">The length of super key should be at least 8 characters and include both numbers and letters</string>
 
@@ -175,6 +175,7 @@
     <string name="setting_reset_su_new_path">new full path</string>
 
     <string name="apm_webui_open">Open</string>
+    <string name="apm_action">Action</string>
     <string name="enable_web_debugging">Enable WebView Debugging</string>
     <string name="enable_web_debugging_summary">Can be used to debug WebUI, please enable only when needed.</string>
 
@@ -243,4 +244,8 @@
     <string name="about_telegram_channel">Telegram Channel</string>
     <string name="about_telegram_group">Telegram Group</string>
     <string name="about_powered_by">Powered by %1$s</string>
+
+    <string name="crash_handle_title">App crashed..</string>
+    <string name="crash_handle_copy">Copy crash log</string>
+    <string name="crash_handle_copied">Copied crash log to clipboard.</string>
 </resources>

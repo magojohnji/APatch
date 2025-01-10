@@ -1,4 +1,8 @@
+@file:Suppress("UnstableApiUsage")
+
 import com.android.build.gradle.internal.api.BaseVariantOutputImpl
+import com.android.build.gradle.tasks.PackageAndroidArtifact
+import org.jetbrains.kotlin.compose.compiler.gradle.ComposeFeatureFlag
 import java.net.URI
 
 plugins {
@@ -40,6 +44,7 @@ android {
             isShrinkResources = true
             isDebuggable = false
             multiDexEnabled = true
+            vcsInfo.include = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -48,6 +53,11 @@ android {
     }
 
     dependenciesInfo.includeInApk = false
+
+    // https://stackoverflow.com/a/77745844
+    tasks.withType<PackageAndroidArtifact> {
+        doFirst { appMetadata.asFile.orNull?.writeText("") }
+    }
 
     buildFeatures {
         aidl = true
@@ -71,8 +81,9 @@ android {
     }
 
     composeCompiler {
-        enableIntrinsicRemember = true
-        enableNonSkippingGroupOptimization = true
+        featureFlags = setOf(
+            ComposeFeatureFlag.OptimizeNonSkippingGroups
+        )
     }
 
     packaging {
@@ -80,21 +91,14 @@ android {
             useLegacyPackaging = true
         }
         resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            excludes += "/META-INF/**.version"
-            excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
-            excludes += "okhttp3/**"
-            excludes += "kotlin/**"
-            excludes += "/org/bouncycastle/**"
-            excludes += "org/**"
-            excludes += "**.properties"
-            excludes += "**.bin"
-            excludes += "kotlin-tooling-metadata.json"
+            excludes += "**"
+            merges += "META-INF/com/google/android/**"
         }
     }
 
     externalNativeBuild {
         cmake {
+            version = "3.28.0+"
             path("src/main/cpp/CMakeLists.txt")
         }
     }
@@ -174,12 +178,12 @@ registerDownloadTask(
     project = project
 )
 
-tasks.register<Copy>("mergeFlashableScript") {
+tasks.register<Copy>("mergeScripts") {
     into("${project.projectDir}/src/main/resources/META-INF/com/google/android")
     from(rootProject.file("${project.rootDir}/scripts/update_binary.sh")) {
         rename { "update-binary" }
     }
-    from(rootProject.file("${project.rootDir}/scripts/update_binary.sh")) {
+    from(rootProject.file("${project.rootDir}/scripts/update_script.sh")) {
         rename { "updater-script" }
     }
 }
@@ -188,7 +192,7 @@ tasks.getByName("preBuild").dependsOn(
     "downloadKpimg",
     "downloadKptools",
     "downloadCompatKpatch",
-    "mergeFlashableScript",
+    "mergeScripts",
 )
 
 // https://github.com/bbqsrc/cargo-ndk
@@ -228,8 +232,10 @@ tasks.clean {
 }
 
 dependencies {
+    implementation(libs.androidx.appcompat)
     implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.core.splashscreen)
+    implementation(libs.androidx.webkit)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.material.icons.extended)
@@ -237,13 +243,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
-    implementation(libs.androidx.core.splashscreen)
-    implementation(libs.androidx.runtime.livedata)
-    implementation(libs.androidx.webkit)
-    implementation(libs.timber)
-    implementation(libs.devappx)
-    implementation(libs.ini4j)
-    implementation(libs.bcpkix)
+    implementation(libs.androidx.compose.runtime.livedata)
 
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
@@ -252,10 +252,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
 
-    implementation(libs.com.google.accompanist.drawablepainter)
-    implementation(libs.com.google.accompanist.navigation.animation)
-
-    implementation(libs.compose.destinations.animations.core)
+    implementation(libs.compose.destinations.core)
     ksp(libs.compose.destinations.ksp)
 
     implementation(libs.com.github.topjohnwu.libsu.core)
@@ -276,6 +273,9 @@ dependencies {
     implementation(libs.sheet.compose.dialogs.input)
 
     implementation(libs.markdown)
-    implementation(libs.com.google.accompanist.webview)
+
+    implementation(libs.timber)
+    implementation(libs.ini4j)
+    implementation(libs.bcpkix)
     compileOnly(libs.cxx)
 }

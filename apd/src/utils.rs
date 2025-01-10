@@ -1,17 +1,19 @@
 use anyhow::{bail, Context, Error, Ok, Result};
 use log::{info, warn};
+use const_format::concatcp;
 use std::ffi::CString;
 use std::{
-    fs::{create_dir_all, File, OpenOptions},
-    io::{ErrorKind::AlreadyExists, Write},
+    fs::{self,create_dir_all, File, OpenOptions},
+    io::{BufRead, BufReader,ErrorKind::AlreadyExists, Write},
     path::Path,
+    process::Stdio
 };
 
+use std::process::Command;
 #[allow(unused_imports)]
 use std::fs::{set_permissions, Permissions};
 #[cfg(unix)]
 use std::os::unix::prelude::PermissionsExt;
-
 use crate::defs;
 use std::fs::metadata;
 
@@ -67,7 +69,15 @@ pub fn getprop(prop: &str) -> Option<String> {
 pub fn getprop(_prop: &str) -> Option<String> {
     unimplemented!()
 }
-
+pub fn run_command(command: &str, args: &[&str], stdout: Option<Stdio>) -> anyhow::Result<std::process::Child> {
+    let mut command_builder = Command::new(command);
+    command_builder.args(args);
+    if let Some(out) = stdout {
+        command_builder.stdout(out);
+    }
+    let child = command_builder.spawn()?;  
+    Ok(child) 
+}
 pub fn is_safe_mode(superkey: Option<String>) -> bool {
     let safemode = getprop("persist.sys.safemode")
         .filter(|prop| prop == "1")
@@ -93,13 +103,6 @@ pub fn is_safe_mode(superkey: Option<String>) -> bool {
     safemode
 }
 
-pub fn get_zip_uncompressed_size(zip_path: &str) -> Result<u64> {
-    let mut zip = zip::ZipArchive::new(std::fs::File::open(zip_path)?)?;
-    let total: u64 = (0..zip.len())
-        .map(|i| zip.by_index(i).unwrap().size())
-        .sum();
-    Ok(total)
-}
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub fn switch_mnt_ns(pid: i32) -> Result<()> {
@@ -114,6 +117,35 @@ pub fn switch_mnt_ns(pid: i32) -> Result<()> {
     }
     ensure!(ret == 0, "switch mnt ns failed");
     Ok(())
+}
+
+pub fn is_overlayfs_supported() -> Result<bool> {
+    let file = File::open("/proc/filesystems")
+        .with_context(|| "Failed to open /proc/filesystems")?;
+    let reader = BufReader::new(file);
+
+    let overlay_supported = reader.lines().any(|line| {
+        if let std::result::Result::Ok(line) = line {
+            line.contains("overlay")
+        } else {
+            false
+        }
+    });
+
+    Ok(overlay_supported)
+}
+pub fn is_symlink(path: &str) -> bool {
+    match fs::symlink_metadata(path) {
+        std::result::Result::Ok(metadata) => metadata.file_type().is_symlink(),
+        std::result::Result::Err(_) => false, 
+    }
+}
+pub fn should_enable_overlay() -> Result<bool> {
+    //let bind_mount_exists = Path::new(defs::BIND_MOUNT_FILE).exists();
+    let overlay_exists = Path::new(defs::OVERLAY_FILE).exists();
+    let overlay_supported = is_overlayfs_supported()?;
+
+    Ok(overlay_exists && overlay_supported)
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -171,4 +203,8 @@ pub fn get_tmp_path() -> &'static str {
         return defs::TEMP_DIR;
     }
     ""
+}
+pub fn get_work_dir() -> String {
+    let tmp_path = get_tmp_path();
+    format!("{}/workdir/", tmp_path)
 }

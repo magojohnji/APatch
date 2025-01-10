@@ -3,6 +3,7 @@ package me.bmax.apatch.ui.screen
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -25,9 +26,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
@@ -35,11 +33,14 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -60,9 +61,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ramcosta.composedestinations.annotation.Destination
-import dev.utils.app.permission.PermissionUtils
+import com.ramcosta.composedestinations.annotation.RootGraph
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -74,10 +77,9 @@ import me.bmax.apatch.util.reboot
 
 private const val TAG = "Patches"
 
-@Destination
+@Destination<RootGraph>
 @Composable
 fun Patches(mode: PatchesViewModel.PatchMode) {
-    val permissionRequest = remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
 
@@ -111,25 +113,19 @@ fun Patches(mode: PatchesViewModel.PatchMode) {
                 .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            val current = LocalContext.current
+            val context = LocalContext.current
 
             // request permissions
-            PermissionUtils.permission(
+            val permissions = arrayOf(
                 Manifest.permission.WRITE_EXTERNAL_STORAGE,
                 Manifest.permission.READ_EXTERNAL_STORAGE
-            ).callback(object : PermissionUtils.PermissionCallback {
-                override fun onGranted() {
-                    permissionRequest.value = false
-                }
-
-                override fun onDenied(
-                    grantedList: MutableList<String>?,
-                    deniedList: MutableList<String>?,
-                    notFoundList: MutableList<String>?
-                ) {
-                    permissionRequest.value = false
-                }
-            }).request(current as Activity)
+            )
+            val permissionsToRequest = permissions.filter {
+                ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+            }
+            if (permissionsToRequest.isNotEmpty()) {
+                ActivityCompat.requestPermissions(context as Activity, permissionsToRequest.toTypedArray(), 1001)
+            }
 
             PatchMode(mode)
             ErrorView(viewModel.error)
@@ -301,23 +297,23 @@ private fun ExtraItem(extra: KPModel.IExtraInfo, existed: Boolean, onDelete: () 
             if (extra.type == KPModel.ExtraType.KPM) {
                 val kpmInfo: KPModel.KPMInfo = extra as KPModel.KPMInfo
                 Text(
-                    text = "${stringResource(id = R.string.patch_item_extra_name)} ${kpmInfo.name}",
+                    text = "${stringResource(id = R.string.patch_item_extra_name) + " "} ${kpmInfo.name}",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
-                    text = "${stringResource(id = R.string.patch_item_extra_version)} ${kpmInfo.version}",
+                    text = "${stringResource(id = R.string.patch_item_extra_version) + " "} ${kpmInfo.version}",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
-                    text = "${stringResource(id = R.string.patch_item_extra_kpm_license)} ${kpmInfo.license}",
+                    text = "${stringResource(id = R.string.patch_item_extra_kpm_license) + " "} ${kpmInfo.license}",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
-                    text = "${stringResource(id = R.string.patch_item_extra_author)} ${kpmInfo.author}",
+                    text = "${stringResource(id = R.string.patch_item_extra_author) + " "} ${kpmInfo.author}",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
-                    text = "${stringResource(id = R.string.patch_item_extra_kpm_desciption)} ${kpmInfo.description}",
+                    text = "${stringResource(id = R.string.patch_item_extra_kpm_desciption) + " "} ${kpmInfo.description}",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 var event by remember { mutableStateOf(kpmInfo.event) }
@@ -327,7 +323,7 @@ private fun ExtraItem(extra: KPModel.IExtraInfo, existed: Boolean, onDelete: () 
                         .background(Color.LightGray)
                 ) {
                     Text(
-                        text = stringResource(id = R.string.patch_item_extra_event),
+                        text = stringResource(id = R.string.patch_item_extra_event) + " ",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     BasicTextField(
@@ -347,7 +343,7 @@ private fun ExtraItem(extra: KPModel.IExtraInfo, existed: Boolean, onDelete: () 
                         .background(Color.LightGray)
                 ) {
                     Text(
-                        text = stringResource(id = R.string.patch_item_extra_args),
+                        text = stringResource(id = R.string.patch_item_extra_args) + " ",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     BasicTextField(
@@ -466,16 +462,16 @@ private fun KernelPatchImageView(kpImgInfo: KPModel.KPImgInfo) {
                 )
             }
             Text(
-                text = stringResource(id = R.string.patch_item_kpimg_version) + Version.uInt2String(
+                text = stringResource(id = R.string.patch_item_kpimg_version) + " " + Version.uInt2String(
                     kpImgInfo.version.substring(2).toUInt(16)
                 ), style = MaterialTheme.typography.bodyMedium
             )
             Text(
-                text = stringResource(id = R.string.patch_item_kpimg_comile_time) + kpImgInfo.compileTime,
+                text = stringResource(id = R.string.patch_item_kpimg_comile_time) + " " + kpImgInfo.compileTime,
                 style = MaterialTheme.typography.bodyMedium
             )
             Text(
-                text = stringResource(id = R.string.patch_item_kpimg_config) + kpImgInfo.config,
+                text = stringResource(id = R.string.patch_item_kpimg_config) + " " + kpImgInfo.config,
                 style = MaterialTheme.typography.bodyMedium
             )
         }

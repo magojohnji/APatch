@@ -1,6 +1,7 @@
 package me.bmax.apatch.ui.screen
 
 import android.app.Activity.RESULT_OK
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
@@ -27,9 +28,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ExperimentalMaterialApi
-import androidx.compose.material.pullrefresh.PullRefreshIndicator
-import androidx.compose.material.pullrefresh.pullRefresh
-import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FloatingActionButton
@@ -37,11 +35,15 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -65,12 +67,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ramcosta.composedestinations.annotation.Destination
+import com.ramcosta.composedestinations.annotation.RootGraph
+import com.ramcosta.composedestinations.generated.destinations.ExecuteAPMActionScreenDestination
+import com.ramcosta.composedestinations.generated.destinations.InstallScreenDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.bmax.apatch.APApplication
-import me.bmax.apatch.Natives
 import me.bmax.apatch.R
 import me.bmax.apatch.ui.WebUIActivity
 import me.bmax.apatch.ui.component.ConfirmResult
@@ -79,7 +83,6 @@ import me.bmax.apatch.ui.component.ModuleStateIndicator
 import me.bmax.apatch.ui.component.ModuleUpdateButton
 import me.bmax.apatch.ui.component.rememberConfirmDialog
 import me.bmax.apatch.ui.component.rememberLoadingDialog
-import me.bmax.apatch.ui.screen.destinations.InstallScreenDestination
 import me.bmax.apatch.ui.viewmodel.APModuleViewModel
 import me.bmax.apatch.util.DownloadListener
 import me.bmax.apatch.util.download
@@ -90,9 +93,10 @@ import me.bmax.apatch.util.ui.LocalSnackbarHost
 import me.bmax.apatch.util.uninstallModule
 import okhttp3.OkHttpClient
 
-@Destination
+@Destination<RootGraph>
 @Composable
 fun APModuleScreen(navigator: DestinationsNavigator) {
+    val snackBarHost = LocalSnackbarHost.current
     val context = LocalContext.current
 
     val state by APApplication.apStateLiveData.observeAsState(APApplication.State.UNKNOWN_STATE)
@@ -121,50 +125,57 @@ fun APModuleScreen(navigator: DestinationsNavigator) {
             viewModel.fetchModuleList()
         }
     }
-
-    val isSafeMode = Natives.getSafeMode()
+    val webUILauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { viewModel.fetchModuleList() }
+    //TODO: FIXME -> val isSafeMode = Natives.getSafeMode()
+    val isSafeMode = false
     val hasMagisk = hasMagisk()
     val hideInstallButton = isSafeMode || hasMagisk || !viewModel.isOverlayAvailable
 
     val moduleListState = rememberLazyListState()
 
-    Scaffold(topBar = {
-        TopBar()
-    }, floatingActionButton = if (hideInstallButton) {
-        { /* Empty */ }
-    } else {
-        {
-            val selectZipLauncher = rememberLauncherForActivityResult(
-                contract = ActivityResultContracts.StartActivityForResult()
-            ) {
-                if (it.resultCode != RESULT_OK) {
-                    return@rememberLauncherForActivityResult
+    Scaffold(
+        topBar = {
+            TopBar()
+        },
+        floatingActionButton = if (hideInstallButton) {
+            { /* Empty */ }
+        } else {
+            {
+                val selectZipLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.StartActivityForResult()
+                ) {
+                    if (it.resultCode != RESULT_OK) {
+                        return@rememberLauncherForActivityResult
+                    }
+                    val data = it.data ?: return@rememberLauncherForActivityResult
+                    val uri = data.data ?: return@rememberLauncherForActivityResult
+
+                    Log.i("ModuleScreen", "select zip result: $uri")
+
+                    navigator.navigate(InstallScreenDestination(uri, MODULE_TYPE.APM))
+
+                    viewModel.markNeedRefresh()
                 }
-                val data = it.data ?: return@rememberLauncherForActivityResult
-                val uri = data.data ?: return@rememberLauncherForActivityResult
 
-                Log.i("ModuleScreen", "select zip result: $uri")
-
-                navigator.navigate(InstallScreenDestination(uri))
-
-                viewModel.markNeedRefresh()
+                FloatingActionButton(contentColor = MaterialTheme.colorScheme.onPrimary,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    onClick = {
+                        // select the zip file to install
+                        val intent = Intent(Intent.ACTION_GET_CONTENT)
+                        intent.type = "application/zip"
+                        selectZipLauncher.launch(intent)
+                    }) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.package_import),
+                        contentDescription = null
+                    )
+                }
             }
-
-            FloatingActionButton(contentColor = MaterialTheme.colorScheme.onPrimary,
-                containerColor = MaterialTheme.colorScheme.primary,
-                onClick = {
-                    // select the zip file to install
-                    val intent = Intent(Intent.ACTION_GET_CONTENT)
-                    intent.type = "application/zip"
-                    selectZipLauncher.launch(intent)
-                }) {
-                Icon(
-                    painter = painterResource(id = R.drawable.package_import),
-                    contentDescription = null
-                )
-            }
-        }
-    }) { innerPadding ->
+        },
+        snackbarHost = { SnackbarHost(snackBarHost) }
+    ) { innerPadding ->
         when {
             hasMagisk -> {
                 Box(
@@ -181,37 +192,44 @@ fun APModuleScreen(navigator: DestinationsNavigator) {
             }
 
             else -> {
-                ModuleList(viewModel = viewModel,
+                ModuleList(
+                    navigator, viewModel = viewModel,
                     modifier = Modifier
                         .padding(innerPadding)
                         .fillMaxSize(),
                     state = moduleListState,
                     onInstallModule = {
-                        navigator.navigate(InstallScreenDestination(it))
+                        navigator.navigate(InstallScreenDestination(it, MODULE_TYPE.APM))
                     },
                     onClickModule = { id, name, hasWebUi ->
                         if (hasWebUi) {
-                            context.startActivity(
+                            webUILauncher.launch(
                                 Intent(
                                     context, WebUIActivity::class.java
                                 ).setData(Uri.parse("apatch://webui/$id")).putExtra("id", id)
                                     .putExtra("name", name)
                             )
                         }
-                    })
+                    },
+                    snackBarHost = snackBarHost,
+                    context = context
+                )
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterialApi::class)
+@OptIn(ExperimentalMaterialApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun ModuleList(
+    navigator: DestinationsNavigator,
     viewModel: APModuleViewModel,
     modifier: Modifier = Modifier,
     state: LazyListState,
     onInstallModule: (Uri) -> Unit,
-    onClickModule: (id: String, name: String, hasWebUi: Boolean) -> Unit
+    onClickModule: (id: String, name: String, hasWebUi: Boolean) -> Unit,
+    snackBarHost: SnackbarHostState,
+    context: Context
 ) {
     val failedEnable = stringResource(R.string.apm_failed_to_enable)
     val failedDisable = stringResource(R.string.apm_failed_to_disable)
@@ -227,9 +245,6 @@ private fun ModuleList(
     val changelogText = stringResource(R.string.apm_changelog)
     val downloadingText = stringResource(R.string.apm_downloading)
     val startDownloadingText = stringResource(R.string.apm_start_downloading)
-
-    val snackBarHost = LocalSnackbarHost.current
-    val context = LocalContext.current
 
     val loadingDialog = rememberLoadingDialog()
     val confirmDialog = rememberConfirmDialog()
@@ -318,16 +333,21 @@ private fun ModuleList(
         } else {
             null
         }
-        val result = snackBarHost.showSnackbar(message, actionLabel = actionLabel)
+        val result = snackBarHost.showSnackbar(
+            message = message,
+            actionLabel = actionLabel,
+            duration = SnackbarDuration.Long
+        )
         if (result == SnackbarResult.ActionPerformed) {
             reboot()
         }
     }
 
-    val refreshState = rememberPullRefreshState(
-        refreshing = viewModel.isRefreshing,
-        onRefresh = { viewModel.fetchModuleList() })
-    Box(modifier.pullRefresh(refreshState)) {
+    PullToRefreshBox(
+        modifier = modifier,
+        onRefresh = { viewModel.fetchModuleList() },
+        isRefreshing = viewModel.isRefreshing
+    ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             state = state,
@@ -379,42 +399,52 @@ private fun ModuleList(
                             }
                         }
 
-                        ModuleItem(module, isChecked, updatedModule.first, onUninstall = {
-                            scope.launch { onModuleUninstall(module) }
-                        }, onCheckChanged = {
-                            scope.launch {
-                                val success = loadingDialog.withLoading {
-                                    withContext(Dispatchers.IO) {
-                                        toggleModule(module.id, !isChecked)
+                        ModuleItem(
+                            navigator,
+                            module,
+                            isChecked,
+                            updatedModule.first,
+                            onUninstall = {
+                                scope.launch { onModuleUninstall(module) }
+                            },
+                            onCheckChanged = {
+                                scope.launch {
+                                    val success = loadingDialog.withLoading {
+                                        withContext(Dispatchers.IO) {
+                                            toggleModule(module.id, !isChecked)
+                                        }
                                     }
-                                }
-                                if (success) {
-                                    isChecked = it
-                                    viewModel.fetchModuleList()
+                                    if (success) {
+                                        isChecked = it
+                                        viewModel.fetchModuleList()
 
-                                    val result = snackBarHost.showSnackbar(
-                                        rebootToApply, actionLabel = reboot
-                                    )
-                                    if (result == SnackbarResult.ActionPerformed) {
-                                        reboot()
+                                        val result = snackBarHost.showSnackbar(
+                                            message = rebootToApply,
+                                            actionLabel = reboot,
+                                            duration = SnackbarDuration.Long
+                                        )
+                                        if (result == SnackbarResult.ActionPerformed) {
+                                            reboot()
+                                        }
+                                    } else {
+                                        val message = if (isChecked) failedDisable else failedEnable
+                                        snackBarHost.showSnackbar(message.format(module.name))
                                     }
-                                } else {
-                                    val message = if (isChecked) failedDisable else failedEnable
-                                    snackBarHost.showSnackbar(message.format(module.name))
                                 }
-                            }
-                        }, onUpdate = {
-                            scope.launch {
-                                onModuleUpdate(
-                                    module,
-                                    updatedModule.third,
-                                    updatedModule.first,
-                                    "${module.name}-${updatedModule.second}.zip"
-                                )
-                            }
-                        }, onClick = {
-                            onClickModule(it.id, it.name, it.hasWebUi)
-                        })
+                            },
+                            onUpdate = {
+                                scope.launch {
+                                    onModuleUpdate(
+                                        module,
+                                        updatedModule.third,
+                                        updatedModule.first,
+                                        "${module.name}-${updatedModule.second}.zip"
+                                    )
+                                }
+                            },
+                            onClick = {
+                                onClickModule(it.id, it.name, it.hasWebUi)
+                            })
                         // fix last item shadow incomplete in LazyColumn
                         Spacer(Modifier.height(1.dp))
                     }
@@ -423,12 +453,6 @@ private fun ModuleList(
         }
 
         DownloadListener(context, onInstallModule)
-
-        PullRefreshIndicator(
-            refreshing = viewModel.isRefreshing, state = refreshState, modifier = Modifier.align(
-                Alignment.TopCenter
-            )
-        )
     }
 }
 
@@ -440,6 +464,7 @@ private fun TopBar() {
 
 @Composable
 private fun ModuleItem(
+    navigator: DestinationsNavigator,
     module: APModuleViewModel.ModuleInfo,
     isChecked: Boolean,
     updateUrl: String,
@@ -452,7 +477,7 @@ private fun ModuleItem(
 ) {
     val decoration = if (!module.remove) TextDecoration.None else TextDecoration.LineThrough
     val moduleAuthor = stringResource(id = R.string.apm_author)
-
+    val viewModel = viewModel<APModuleViewModel>()
     Surface(
         modifier = modifier,
         color = MaterialTheme.colorScheme.surface,
@@ -546,6 +571,33 @@ private fun ModuleItem(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = stringResource(id = R.string.apm_webui_open),
+                                maxLines = 1,
+                                overflow = TextOverflow.Visible,
+                                softWrap = false
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+                    }
+
+                    if (module.hasActionScript) {
+                        FilledTonalButton(
+                            onClick = { 
+                                navigator.navigate(ExecuteAPMActionScreenDestination(module.id))
+                                viewModel.markNeedRefresh()
+                            },
+                            enabled = true,
+                            contentPadding = PaddingValues(horizontal = 12.dp)
+                        ) {
+                            Icon(
+                                modifier = Modifier.size(20.dp),
+                                painter = painterResource(id = R.drawable.settings),
+                                contentDescription = null
+                            )
+
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = stringResource(id = R.string.apm_action),
                                 maxLines = 1,
                                 overflow = TextOverflow.Visible,
                                 softWrap = false

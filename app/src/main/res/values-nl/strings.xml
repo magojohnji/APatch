@@ -6,7 +6,6 @@
     <string name="android_patch">AndroidPatch</string>
     <string name="settings">Instellingen</string>
     <string name="reboot">Opnieuw Opstarten</string>
-    <string name="reboot_userspace">Zacht opnieuw opstarten</string>
     <string name="reboot_edl">Start opnieuw op naar EDL</string>
     <string name="about">Over</string>
     <string name="settings_app_language">Taal</string>
@@ -94,4 +93,21 @@
     <string name="settings_clear_super_key_dialog">Wil je zeker verder gaan?</string>
     <string name="success">Succes</string>
     <string name="failure">Mislukking</string>
+    <string name="settings_check_update">Controleer op update</string>
+    <string name="settings_check_update_summary">Automatisch controleren op updates als je de app opent</string>
+    <string name="blue_theme">Blauw Thema</string>
+    <string name="brown_theme">Bruin Thema</string>
+    <string name="cyan_theme">Cyaan Thema</string>
+    <string name="indigo_theme">Indigo Thema</string>
+    <string name="deep_purple_theme">Donker Paars Thema</string>
+    <string name="light_blue_theme">Licht Blauw Thema</string>
+    <string name="green_theme">Groen Thema</string>
+    <string name="light_green_theme">Licht Groen Thema</string>
+    <string name="purple_theme">Paars Thema</string>
+    <string name="red_theme">Rood Thema</string>
+    <string name="sakura_theme">Sakura Thema</string>
+    <string name="deep_orange_theme">Donker Oranje Thema</string>
+    <string name="lime_theme">Limoen Thema</string>
+    <string name="orange_theme">Oranje Thema</string>
+    <string name="pink_theme">Roze Thema</string>
 </resources>

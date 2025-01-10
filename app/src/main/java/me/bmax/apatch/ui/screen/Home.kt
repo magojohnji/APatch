@@ -1,8 +1,6 @@
 package me.bmax.apatch.ui.screen
 
-import android.content.Context
 import android.os.Build
-import android.os.PowerManager
 import android.system.Os
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
@@ -71,7 +69,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -82,8 +79,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.window.SecureFlagPolicy
+import androidx.lifecycle.compose.dropUnlessResumed
 import com.ramcosta.composedestinations.annotation.Destination
-import com.ramcosta.composedestinations.annotation.RootNavGraph
+import com.ramcosta.composedestinations.annotation.RootGraph
+import com.ramcosta.composedestinations.generated.destinations.AboutScreenDestination
+import com.ramcosta.composedestinations.generated.destinations.InstallModeSelectScreenDestination
+import com.ramcosta.composedestinations.generated.destinations.PatchesDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -93,9 +94,6 @@ import me.bmax.apatch.R
 import me.bmax.apatch.apApp
 import me.bmax.apatch.ui.component.ProvideMenuShape
 import me.bmax.apatch.ui.component.rememberConfirmDialog
-import me.bmax.apatch.ui.screen.destinations.AboutScreenDestination
-import me.bmax.apatch.ui.screen.destinations.InstallModeSelectScreenDestination
-import me.bmax.apatch.ui.screen.destinations.PatchesDestination
 import me.bmax.apatch.ui.viewmodel.PatchesViewModel
 import me.bmax.apatch.util.LatestVersionInfo
 import me.bmax.apatch.util.Version
@@ -107,8 +105,7 @@ import me.bmax.apatch.util.ui.APDialogBlurBehindUtils
 
 private val managerVersion = getManagerVersion()
 
-@RootNavGraph(start = true)
-@Destination
+@Destination<RootGraph>(start = true)
 @Composable
 fun HomeScreen(navigator: DestinationsNavigator) {
     var showPatchFloatAction by remember { mutableStateOf(true) }
@@ -121,8 +118,8 @@ fun HomeScreen(navigator: DestinationsNavigator) {
     }
 
     Scaffold(topBar = {
-        TopBar(onInstallClick = {
-            navigator.navigate(InstallModeSelectScreenDestination, true)
+        TopBar(onInstallClick = dropUnlessResumed {
+            navigator.navigate(InstallModeSelectScreenDestination)
         }, navigator, kpState)
     }) { innerPadding ->
         Column(
@@ -416,12 +413,6 @@ private fun TopBar(
                         showDropdownReboot = false
                     }) {
                         RebootDropdownItem(id = R.string.reboot)
-
-                        val pm =
-                            LocalContext.current.getSystemService(Context.POWER_SERVICE) as PowerManager?
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && pm?.isRebootingUserspaceSupported == true) {
-                            RebootDropdownItem(id = R.string.reboot_userspace, reason = "userspace")
-                        }
                         RebootDropdownItem(id = R.string.reboot_recovery, reason = "recovery")
                         RebootDropdownItem(id = R.string.reboot_bootloader, reason = "bootloader")
                         RebootDropdownItem(id = R.string.reboot_download, reason = "download")
@@ -983,7 +974,7 @@ fun LearnMoreCard() {
         Row(modifier = Modifier
             .fillMaxWidth()
             .clickable {
-                uriHandler.openUri("https://apatch.top")
+                uriHandler.openUri("https://apatch.dev")
             }
             .padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
             Column {

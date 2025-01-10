@@ -6,7 +6,6 @@
     <string name="android_patch">AndroidPatch</string>
     <string name="reboot">Перезавантаження</string>
     <string name="settings">Налаштування</string>
-    <string name="reboot_userspace">М\'яке Перезавантаження</string>
     <string name="reboot_recovery">Перезавантаження в режим відновлення</string>
     <string name="reboot_bootloader">Перезавантаження в завантажувач</string>
     <string name="reboot_download">Перезавантаження в режим завантаження</string>
@@ -42,7 +41,7 @@
     <string name="kpm_author">Автор</string>
     <string name="kpm_args">Аргументи</string>
     <string name="su_selinux_via_hook">Обхід через хук</string>
-    <string name="su_pkg_excluded_setting_title">Виключити</string>
+    <string name="su_pkg_excluded_setting_title">Виключити модифікації</string>
     <string name="su_show_system_apps">Показати системні додатки</string>
     <string name="su_refresh">Оновити</string>
     <string name="apm">Модулі</string>
@@ -58,7 +57,7 @@
     <string name="patch_warnning">Інсталяція має ризики. Будь ласка, створіть резервну копію ваших даних.</string>
     <string name="reboot_edl">Перезавантаження в EDL</string>
     <string name="home_click_to_learn_apatch">Дізнайтеся більше про можливості APatch і про його використання</string>
-    <string name="about_source_code">&lt;p&gt;Перегляньте відкритий код на %1$s&lt;p/&gt; Приєднуйтеся до нашого %2$s каналу&lt;p/&gt;Приєднуйтеся до нашої %2$s групи</string>
+    <string name="about_source_code"><![CDATA[<p> Перегляньте вихідний код на %1$s<p/> Приєднуйтеся до нашого каналу %2$s<p/> Приєднуйтеся до нашої групи %3$s]]></string>
     <string name="send_log">Надіслати звіт</string>
     <string name="apatch_version_update">Версія: %s → %s</string>
     <string name="home_apatch_version">Версія APatch %s</string>
@@ -76,7 +75,7 @@
     <string name="kpm_version">Версія</string>
     <string name="su_title">Суперкористувач</string>
     <string name="su_pkg_excluded_label">Виключити</string>
-    <string name="su_pkg_excluded_setting_summary">для модулів</string>
+    <string name="su_pkg_excluded_setting_summary">Увімкнення цієї опції дозволить APatch відновити будь-які модифіковані файли, змінені модулями для цієї програми.</string>
     <string name="su_hide_system_apps">Приховати системні додатки</string>
     <string name="apm_empty">Немає встановлених модулів</string>
     <string name="apm_install">Встановити</string>
@@ -111,18 +110,18 @@
     <string name="patch_item_bootimg_dev">пристрій:</string>
     <string name="patch_item_kernel">Ядро</string>
     <string name="patch_item_kpimg">kpimg</string>
-    <string name="patch_item_kpimg_version">версія:</string>
-    <string name="patch_item_kpimg_comile_time">час:</string>
-    <string name="patch_item_kpimg_config">налаштування:</string>
+    <string name="patch_item_kpimg_version">Версія:</string>
+    <string name="patch_item_kpimg_comile_time">Час:</string>
+    <string name="patch_item_kpimg_config">Налаштування:</string>
     <string name="patch_item_new_extra_kpm">Вбудувати новий</string>
     <string name="patch_item_existed_extra_kpm">Існуючий</string>
-    <string name="patch_item_extra_name">ім\'я:</string>
-    <string name="patch_item_extra_version">версія:</string>
-    <string name="patch_item_extra_author">автор:</string>
-    <string name="patch_item_extra_kpm_license">ліцензія:</string>
-    <string name="patch_item_extra_kpm_desciption">опис:</string>
-    <string name="patch_item_extra_args">аргументи:</string>
-    <string name="patch_item_extra_event">подія:</string>
+    <string name="patch_item_extra_name">Ім\'я:</string>
+    <string name="patch_item_extra_version">Версія:</string>
+    <string name="patch_item_extra_author">Автор:</string>
+    <string name="patch_item_extra_kpm_license">Ліцензія:</string>
+    <string name="patch_item_extra_kpm_desciption">Опис:</string>
+    <string name="patch_item_extra_args">Аргументи:</string>
+    <string name="patch_item_extra_event">Подія:</string>
     <string name="patch_item_set_skey_label">Довжина суперключа повинна бути не менше 8 символів і включати числа і букви</string>
     <string name="patch_item_skey">Суперключ</string>
     <string name="settings_clear_super_key_dialog">Ви дійсно хочете продовжити?</string>
@@ -211,4 +210,10 @@
     <string name="kpm_control_paramters">Параметри</string>
     <string name="settings_night_mode_follow_sys">Слідкувати за системно темою</string>
     <string name="settings_night_theme_enabled">Увімкнути темну тему</string>
+    <string name="save_log">Зберегти журнал</string>
+    <string name="apm_action">Дія</string>
+    <string name="log_saved">Журнал збережено</string>
+    <string name="crash_handle_title">Збій програми..</string>
+    <string name="crash_handle_copied">Журнал збоїв скопійовано в буфер обміну.</string>
+    <string name="crash_handle_copy">Копіювати журнал збоїв</string>
 </resources>

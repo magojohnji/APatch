@@ -1,16 +1,56 @@
-use anyhow::{bail, Context, Result};
-use log::{info, warn};
-use std::env;
-use std::{collections::HashMap, path::Path};
-
-use crate::module::prune_modules;
+use crate::module;
+use crate::supercall::fork_for_result;
+use crate::utils::{switch_cgroups,ensure_dir_exists,get_work_dir,ensure_file_exists};
 use crate::{
-    assets, defs, mount,
-    package::synchronize_package_uid,
-    restorecon,
-    supercall::{init_load_su_path, init_load_su_uid},
+    assets, defs, mount, restorecon, supercall,
+    supercall::{init_load_package_uid_config, init_load_su_path, refresh_ap_package_list},
     utils::{self, ensure_clean_dir},
 };
+use anyhow::{bail, ensure, Context, Result};
+use log::{info, warn};
+use crate::m_mount;
+use notify::event::{ModifyKind, RenameMode};
+use notify::{Config, Event, EventKind, INotifyWatcher, RecursiveMode, Watcher};
+use std::ffi::CStr;
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
+use std::path::{PathBuf,Path};
+use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use std::{collections::HashMap, thread};
+use std::{env, fs,io};
+use rustix::{fd::AsFd, fs::CWD, mount::*};
+use std::fs::{remove_dir_all, rename};
+use walkdir::WalkDir;
+use extattr::{lsetxattr, lgetxattr, Flags as XattrFlags};
+
+fn copy_with_xattr(src: &Path, dest: &Path) -> io::Result<()> {
+    fs::copy(src, dest)?;
+
+    if let Ok(xattr_value) = lgetxattr(src, "security.selinux") {
+        lsetxattr(dest, "security.selinux", &xattr_value, XattrFlags::empty())?;
+    }
+
+    Ok(())
+}
+
+fn copy_dir_with_xattr(src: &Path, dest: &Path) -> io::Result<()> {
+    for entry in WalkDir::new(src) {
+        let entry = entry?;
+        let rel_path = entry
+            .path()
+            .strip_prefix(src)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        let target_path = dest.join(rel_path);
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(&target_path)?;
+        } else if entry.file_type().is_file() {
+            copy_with_xattr(entry.path(), &target_path)?;
+        }
+    }
+    Ok(())
+}
 
 fn mount_partition(partition_name: &str, lowerdir: &Vec<String>) -> Result<()> {
     if lowerdir.is_empty() {
@@ -37,9 +77,49 @@ fn mount_partition(partition_name: &str, lowerdir: &Vec<String>) -> Result<()> {
     mount::mount_overlay(&partition, lowerdir, workdir, upperdir)
 }
 
-pub fn mount_systemlessly(module_dir: &str) -> Result<()> {
+pub fn mount_systemlessly(module_dir: &str,is_img: bool) -> Result<()> {
     // construct overlay mount params
-    let dir = std::fs::read_dir(module_dir);
+    if !is_img {
+
+        info!("fallback to modules.img");
+        let module_update_dir = defs::MODULE_DIR;
+        let module_dir = defs::MODULE_MOUNT_DIR;
+        let tmp_module_img = defs::MODULE_UPDATE_TMP_IMG; 
+        let tmp_module_path = Path::new(tmp_module_img);
+
+        ensure_clean_dir(module_dir)?;
+        info!("- Preparing image");
+        if tmp_module_path.exists() { //if it have update,remove tmp file
+            std::fs::remove_file(tmp_module_path)?;
+        }
+        let total_size = calculate_total_size(Path::new(module_update_dir))?; //create modules adapt size
+        info!("Total size of files in '{}': {} bytes",tmp_module_path.display(),total_size);
+        let grow_size =  128 * 1024 * 1024 + total_size;
+        fs::File::create(tmp_module_img)
+            .context("Failed to create ext4 image file")?
+            .set_len(grow_size)
+            .context("Failed to extend ext4 image")?;
+        let result = Command::new("mkfs.ext4")
+            .arg("-b")
+            .arg("1024")
+            .arg(tmp_module_img)
+            .stdout(std::process::Stdio::piped())
+            .output()?;
+        ensure!(result.status.success(),"Failed to format ext4 image: {}",String::from_utf8(result.stderr).unwrap());
+        info!("Checking Image");
+        module::check_image(tmp_module_img)?;
+        info!("- Mounting image");
+        mount::AutoMountExt4::try_new(tmp_module_img, module_dir, false)
+            .with_context(|| "mount module image failed".to_string())?;
+        info!("mounted {} to {}", tmp_module_img, module_dir);
+        let _ = restorecon::setsyscon(module_dir);
+        let command_string = format!("cp --preserve=context -R {}* {};",module_update_dir,module_dir);
+        let args = vec!["-c",&command_string];
+        let _ = utils::run_command("sh", &args, None)?.wait()?;
+        mount_systemlessly(module_dir,true)?;
+        return Ok(());
+    }
+    let dir = fs::read_dir(module_dir);
     let Ok(dir) = dir else {
         bail!("open {} failed", defs::MODULE_DIR);
     };
@@ -88,6 +168,11 @@ pub fn mount_systemlessly(module_dir: &str) -> Result<()> {
     // mount /system first
     if let Err(e) = mount_partition("system", &system_lowerdir) {
         warn!("mount system failed: {:#}", e);
+        //ensure_file_exists(format!("{}",defs::BIND_MOUNT_FILE))?;
+        //ensure_clean_dir(defs::MODULE_DIR)?;
+        //info!("bind_mount enable,overlayfs is not work,clear module_dir");
+        
+        
     }
 
     // mount other partitions
@@ -100,20 +185,118 @@ pub fn mount_systemlessly(module_dir: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn systemless_bind_mount(module_dir: &str) -> Result<()> {
+    //let propagation_flags = MountPropagationFlags::PRIVATE;
+
+    //let combined_flags = MountFlags::empty() | MountFlags::from_bits_truncate(propagation_flags.bits());
+    // set tmp_path prvate
+    //mount("tmpfs",utils::get_tmp_path(),"tmpfs",combined_flags,"")?;
+ 
+    // construct bind mount params
+    m_mount::magic_mount()?;
+    Ok(())
+}
+
+pub fn calculate_total_size(path: &Path) -> std::io::Result<u64> {
+    let mut total_size = 0;
+    if path.is_dir() {
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+            if file_type.is_file() {
+                total_size += entry.metadata()?.len();
+            } else if file_type.is_dir() {
+                total_size += calculate_total_size(&entry.path())?;
+            }
+        }
+    }
+    Ok(total_size)
+}
+pub fn move_file(module_update_dir: &str,module_dir: &str)-> Result<()> {
+    for entry in fs::read_dir(module_update_dir)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        let file_name_str = file_name.to_string_lossy();
+
+        if entry.path().is_dir() {
+            let source_path = Path::new(module_update_dir).join(file_name_str.as_ref()); 
+            let target_path = Path::new(module_dir).join(file_name_str.as_ref()); 
+            if target_path.exists() {
+                info!("Removing existing folder in target directory: {}", file_name_str);
+                remove_dir_all(&target_path)?;  
+            }
+
+            info!("Moving {} to target directory", file_name_str);
+            rename(&source_path, &target_path)?;  
+        }
+    }
+    return Ok(());
+}
 pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
     utils::umask(0);
-
+    use std::process::Stdio;
     #[cfg(unix)]
-    let _ = catch_bootlog();
-
-    init_load_su_uid(&superkey);
+    init_load_package_uid_config(&superkey);
 
     init_load_su_path(&superkey);
+
+    let args = ["/data/adb/ap/bin/magiskpolicy", "--magisk", "--live"];
+    fork_for_result("/data/adb/ap/bin/magiskpolicy", &args, &superkey);
+
+    info!("Re-privilege apd profile after injecting sepolicy");
+    supercall::privilege_apd_profile(&superkey);
 
     if utils::has_magisk() {
         warn!("Magisk detected, skip post-fs-data!");
         return Ok(());
     }
+
+    // Create log environment
+    if !Path::new(defs::APATCH_LOG_FOLDER).exists() {
+        fs::create_dir(defs::APATCH_LOG_FOLDER).expect("Failed to create log folder");
+        let permissions = fs::Permissions::from_mode(0o700);
+        fs::set_permissions(defs::APATCH_LOG_FOLDER, permissions)
+            .expect("Failed to set permissions");
+    }
+    let mut command_string = format!(
+        "rm -rf {}*.old.log; for file in {}*; do mv \"$file\" \"$file.old.log\"; done",
+        defs::APATCH_LOG_FOLDER,
+        defs::APATCH_LOG_FOLDER
+    );
+    let mut args = vec!["-c", &command_string]; 
+    // for all file to .old
+    let result = utils::run_command("sh", &args, None)?.wait()?;
+    if result.success() {
+        info!("Successfully deleted .old files.");
+    } else {
+        info!("Failed to delete .old files.");
+    }
+    let logcat_path = format!("{}locat.log", defs::APATCH_LOG_FOLDER);
+    let dmesg_path = format!("{}dmesg.log", defs::APATCH_LOG_FOLDER);
+    let bootlog = std::fs::File::create(dmesg_path)?;
+    args = vec!["-s","9","120s","logcat","-b","main,system,crash","-f",&logcat_path,"logcatcher-bootlog:S","&"];
+    let _ = unsafe {
+        std::process::Command::new("timeout")
+            .process_group(0)
+            .pre_exec(|| {
+                utils::switch_cgroups();
+                Ok(())
+            })
+            .args(args)
+            .spawn()
+    };
+    args = vec!["-s","9","120s","dmesg","-w"];
+    let result = unsafe {
+        std::process::Command::new("timeout")
+            .process_group(0)
+            .pre_exec(|| {
+                utils::switch_cgroups();
+                Ok(())
+            })
+            .args(args)
+            .stdout(Stdio::from(bootlog))
+            .spawn()
+    };
 
     let key = "KERNELPATCH_VERSION";
     match env::var(key) {
@@ -127,7 +310,7 @@ pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
         Err(_) => println!("{} not found", key),
     }
 
-    let safe_mode = crate::utils::is_safe_mode(superkey.clone());
+    let safe_mode = utils::is_safe_mode(superkey.clone());
 
     if safe_mode {
         // we should still mount modules.img to `/data/adb/modules` in safe mode
@@ -142,45 +325,23 @@ pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
             warn!("exec common post-fs-data scripts failed: {}", e);
         }
     }
-
-    let module_update_img = defs::MODULE_UPDATE_IMG;
-    let module_img = defs::MODULE_IMG;
-    let module_dir = defs::MODULE_DIR;
-    let module_update_flag = Path::new(defs::WORKING_DIR).join(defs::UPDATE_FILE_NAME);
-
-    // modules.img is the default image
-    let mut target_update_img = &module_img;
-
-    // we should clean the module mount point if it exists
-    ensure_clean_dir(module_dir)?;
-
+    let module_update_dir = defs::MODULE_UPDATE_TMP_DIR; //save module place
+    let module_dir = defs::MODULE_DIR;// run modules place
+    let module_update_flag = Path::new(defs::WORKING_DIR).join(defs::UPDATE_FILE_NAME);// if update ,there will be renew modules file
     assets::ensure_binaries().with_context(|| "binary missing")?;
 
-    if Path::new(module_update_img).exists() {
-        if module_update_flag.exists() {
-            // if modules_update.img exists, and the the flag indicate this is an update
-            // this make sure that if the update failed, we will fallback to the old image
-            // if we boot succeed, we will rename the modules_update.img to modules.img #on_boot_complete
-            target_update_img = &module_update_img;
-            // And we should delete the flag immediately
-            std::fs::remove_file(module_update_flag)?;
-        } else {
-            // if modules_update.img exists, but the flag not exist, we should delete it
-            std::fs::remove_file(module_update_img)?;
-        }
+    let tmp_module_img = defs::MODULE_UPDATE_TMP_IMG; 
+    let tmp_module_path = Path::new(tmp_module_img);
+    move_file(module_update_dir,module_dir)?;
+    info!("remove update flag");
+    let _ = fs::remove_file(module_update_flag);
+    if tmp_module_path.exists() { //if it have update,remove tmp file
+        std::fs::remove_file(tmp_module_path)?;
     }
 
-    if !Path::new(target_update_img).exists() {
-        return Ok(());
-    }
+    let lite_file = Path::new(defs::LITEMODE_FILE);
 
-    // we should always mount the module.img to module dir
-    // becuase we may need to operate the module dir in safe mode
-    info!("mount module image: {target_update_img} to {module_dir}");
-    mount::AutoMountExt4::try_new(target_update_img, module_dir, false)
-        .with_context(|| "mount module image failed".to_string())?;
-
-    // if we are in safe mode, we should disable all modules
+    
     if safe_mode {
         warn!("safe mode, skip post-fs-data scripts and disable all modules!");
         if let Err(e) = crate::module::disable_all_modules() {
@@ -189,7 +350,7 @@ pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
         return Ok(());
     }
 
-    if let Err(e) = prune_modules() {
+    if let Err(e) = module::prune_modules() {
         warn!("prune modules failed: {}", e);
     }
 
@@ -201,10 +362,15 @@ pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
     if crate::module::load_sepolicy_rule().is_err() {
         warn!("load sepolicy.rule failed");
     }
+    if lite_file.exists() {
+        info!("litemode runing skip mount tempfs")
+    }else{
+        if let Err(e) = mount::mount_tmpfs(utils::get_tmp_path()) {
+            warn!("do temp dir mount failed: {}", e);
+        }
 
-    if let Err(e) = mount::mount_tmpfs(utils::get_tmp_path()) {
-        warn!("do temp dir mount failed: {}", e);
     }
+    
 
     // exec modules post-fs-data scripts
     // TODO: Add timeout
@@ -217,14 +383,61 @@ pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
         warn!("load system.prop failed: {}", e);
     }
 
-    // mount module systemlessly by overlay
-    if let Err(e) = mount_systemlessly(module_dir) {
-        warn!("do systemless mount failed: {}", e);
+    
+    if lite_file.exists() {
+        info!("litemode runing skip mount state")
+    }else{
+
+        if utils::should_enable_overlay()? {
+            // mount module systemlessly by overlay
+            let work_dir = get_work_dir();
+            let tmp_dir = PathBuf::from(work_dir.clone());
+            ensure_dir_exists(&tmp_dir)?;
+            mount(defs::AP_OVERLAY_SOURCE, &tmp_dir, "tmpfs", MountFlags::empty(), "").context("mount tmp")?;
+            mount_change(&tmp_dir, MountPropagationFlags::PRIVATE).context("make tmp private")?;
+            let dir_names = vec!["vendor", "product", "system_ext", "odm", "oem", "system"];
+            let dir = fs::read_dir(module_dir)?;
+            for entry in dir.flatten() {
+                let module_path = entry.path();
+                let disabled = module_path.join(defs::DISABLE_FILE_NAME).exists();
+                if disabled {
+                    info!("module: {} is disabled, ignore!", module_path.display());
+                    continue;
+                }
+                if module_path.is_dir() {
+                    let module_name = module_path.file_name().unwrap().to_string_lossy();
+                    let module_dest = Path::new(&work_dir).join(module_name.as_ref());
+    
+                    for sub_dir in dir_names.iter() {
+                        let sub_dir_path = module_path.join(sub_dir);
+                        if sub_dir_path.exists() && sub_dir_path.is_dir() {
+                            let sub_dir_dest = module_dest.join(sub_dir);
+                            fs::create_dir_all(&sub_dir_dest)?;
+    
+                            copy_dir_with_xattr(&sub_dir_path, &sub_dir_dest)?;
+                        }
+                    }
+                }
+            }
+            if let Err(e) = mount_systemlessly(&get_work_dir(),false) {
+                warn!("do systemless mount failed: {}", e);
+            }
+            if let Err(e) = unmount(&tmp_dir, UnmountFlags::DETACH) {
+                log::error!("failed to unmount tmp {}", e);
+            }
+        }else{
+            if let Err(e) = systemless_bind_mount(module_dir) {
+                warn!("do systemless bind_mount failed: {}", e);
+            }
+            
+    
+        }
     }
+    
 
     run_stage("post-mount", superkey, true);
 
-    std::env::set_current_dir("/").with_context(|| "failed to chdir to /")?;
+    env::set_current_dir("/").with_context(|| "failed to chdir to /")?;
 
     Ok(())
 }
@@ -237,7 +450,7 @@ fn run_stage(stage: &str, superkey: Option<String>, block: bool) {
         return;
     }
 
-    if crate::utils::is_safe_mode(superkey) {
+    if utils::is_safe_mode(superkey) {
         warn!("safe mode, skip {stage} scripts");
         if let Err(e) = crate::module::disable_all_modules() {
             warn!("disable all modules failed: {}", e);
@@ -260,65 +473,82 @@ pub fn on_services(superkey: Option<String>) -> Result<()> {
     Ok(())
 }
 
+fn run_uid_monitor() {
+    info!("Trigger run_uid_monitor!");
+
+    let mut command = &mut Command::new("/data/adb/apd");
+    {
+        command = command.process_group(0);
+        command = unsafe {
+            command.pre_exec(|| {
+                // ignore the error?
+                switch_cgroups();
+                Ok(())
+            })
+        };
+    }
+    command = command.arg("uid-listener");
+
+    command
+        .spawn()
+        .map(|_| ())
+        .expect("[run_uid_monitor] Failed to run uid monitor");
+}
+
 pub fn on_boot_completed(superkey: Option<String>) -> Result<()> {
     info!("on_boot_completed triggered!");
-    let module_update_img = Path::new(defs::MODULE_UPDATE_IMG);
-    let module_img = Path::new(defs::MODULE_IMG);
-    if module_update_img.exists() {
-        // this is a update and we successfully booted
-        if std::fs::rename(module_update_img, module_img).is_err() {
-            warn!("Failed to rename images, copy it now.",);
-            std::fs::copy(module_update_img, module_img)
-                .with_context(|| "Failed to copy images")?;
-            std::fs::remove_file(module_update_img).with_context(|| "Failed to remove image!")?;
-        }
-    }
 
-    //synchronize_package_uid();
+    run_uid_monitor();
     run_stage("boot-completed", superkey, false);
 
     Ok(())
 }
 
-pub fn on_sync_uid() -> Result<()> {
-    synchronize_package_uid();
-    return Ok(());
-}
+pub fn start_uid_listener() -> Result<()> {
+    info!("start_uid_listener triggered!");
+    println!("[start_uid_listener] Registering...");
 
-#[cfg(unix)]
-fn catch_bootlog() -> Result<()> {
-    use std::os::unix::process::CommandExt;
-    use std::process::Stdio;
+    // create inotify instance
+    const SYS_PACKAGES_LIST_TMP: &str = "/data/system/packages.list.tmp";
+    let sys_packages_list_tmp = PathBuf::from(&SYS_PACKAGES_LIST_TMP);
+    let dir: PathBuf = sys_packages_list_tmp.parent().unwrap().into();
 
-    let logdir = Path::new(defs::LOG_DIR);
-    utils::ensure_dir_exists(logdir)?;
-    let aptchlog = logdir.join("apatch.log");
-    let oldapatchlog = logdir.join("apatch.old.log");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let tx_clone = tx.clone();
+    let mutex = Arc::new(Mutex::new(()));
 
-    if aptchlog.exists() {
-        std::fs::rename(&aptchlog, oldapatchlog)?;
-    }
+    let mut watcher = INotifyWatcher::new(
+        move |ev: notify::Result<Event>| match ev {
+            Ok(Event {
+                kind: EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+                paths,
+                ..
+            }) => {
+                if paths.contains(&sys_packages_list_tmp) {
+                    info!("[uid_monitor] System packages list changed, sending to tx...");
+                    tx_clone.send(false).unwrap()
+                }
+            }
+            Err(err) => warn!("inotify error: {err}"),
+            _ => (),
+        },
+        Config::default(),
+    )?;
 
-    let aptchlog = std::fs::File::create(aptchlog)?;
+    watcher.watch(dir.as_ref(), RecursiveMode::NonRecursive)?;
 
-    // timeout -s 9 30s logcat > apatch.log
-    let result = unsafe {
-        std::process::Command::new("timeout")
-            .process_group(0)
-            .pre_exec(|| {
-                utils::switch_cgroups();
-                Ok(())
-            })
-            .arg("-s")
-            .arg("9")
-            .arg("30s")
-            .arg("logcat")
-            .stdout(Stdio::from(aptchlog))
-            .spawn()
-    };
-
-    if let Err(e) = result {
-        warn!("Failed to start logcat: {:#}", e);
+    let mut debounce = false;
+    while let Ok(delayed) = rx.recv() {
+        if delayed {
+            debounce = false;
+            let skey = CStr::from_bytes_with_nul(b"su\0")
+                .expect("[start_uid_listener] CStr::from_bytes_with_nul failed");
+            refresh_ap_package_list(&skey, &mutex);
+        } else if !debounce {
+            thread::sleep(Duration::from_secs(1));
+            debounce = true;
+            tx.send(true).unwrap();
+        }
     }
 
     Ok(())

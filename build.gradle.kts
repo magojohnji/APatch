@@ -14,23 +14,20 @@ plugins {
 cmaker {
     default {
         arguments += "-DANDROID_STL=none"
+        arguments += "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
         abiFilters("arm64-v8a")
     }
 }
 
-project.ext.set("kernelPatchVersion", "0.11.0-dev")
+project.ext.set("kernelPatchVersion", "0.11.1-dev")
 
 val androidMinSdkVersion = 26
-val androidTargetSdkVersion = 34
-val androidCompileSdkVersion = 34
+val androidTargetSdkVersion = 35
+val androidCompileSdkVersion = 35
 
-val androidCompileNdkVersion = "26.3.11579264"
+val androidCompileNdkVersion = "27.1.12297006"
 val managerVersionCode by extra(getVersionCode())
 val managerVersionName by extra(getVersionName())
-
-tasks.register<Delete>("clean") {
-    delete(rootProject.layout.buildDirectory)
-}
 
 fun getGitCommitCount(): Int {
     val out = ByteArrayOutputStream()
